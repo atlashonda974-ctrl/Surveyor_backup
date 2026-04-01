@@ -3747,155 +3747,71 @@ Thank you for your cooperation.</textarea>
 
         // Function to load documents with approval remarks
         function loadDocumentsWithApprovalRemarks(docNo) {
-            // console.log('Loading documents for doc:', docNo);
+    $('#documentTableBody').html('<tr><td colspan="4" class="text-center"><div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading documents...</td></tr>');
+    
+    $.ajax({
+        url: '{{ url("documents") }}/' + docNo + '/files',
+        method: 'GET',
+        success: function(documents) {
+            $('#documentTableBody').empty();
             
-            // Clear previous content
-            $('#documentTableBody').html('<tr><td colspan="4" class="text-center"><div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading documents...</td></tr>');
-            
-            // First, load the documents
-            $.ajax({
-                url: '{{ url('documents') }}/' + docNo + '/files',
-                method: 'GET',
-                success: function(documents) {
-                    // console.log('Documents loaded:', documents);
-                    
-                    $('#documentTableBody').empty();
-                    if (!documents || documents.length === 0) {
-                        $('#documentTableBody').html('<tr><td colspan="4" class="text-center">No documents uploaded yet.</td></tr>');
-                    } else {
-                        // Now fetch approval remarks from filestab table
-                        $.ajax({
-                            url: '{{ route("admin.getApprovalData") }}',
-                            method: 'GET',
-                            data: { doc_no: docNo },
-                            success: function(approvalData) {
-                                // console.log('Approval data received:', approvalData);
-                                
-                                if (!approvalData.success) {
-                                    console.error('Failed to get approval data:', approvalData.message);
-                                    showDocumentsWithDefaultRemarks(documents);
-                                    return;
-                                }
-                                
-                                // Get approval remarks from the response
-                                const approvalRemarks = approvalData.app_rem || '';
-                                // console.log('Approval remarks raw:', approvalRemarks);
-                                
-                                // Parse remarks into an array
-                                let remarksArray = [];
-                                if (approvalRemarks && approvalRemarks.trim() !== '') {
-                                    // Split by newline first, then by comma if no newlines
-                                    if (approvalRemarks.includes('\n')) {
-                                        remarksArray = approvalRemarks.split('\n')
-                                            .map(r => r.trim())
-                                            .filter(r => r !== '');
-                                    } else if (approvalRemarks.includes(',')) {
-                                        remarksArray = approvalRemarks.split(',')
-                                            .map(r => r.trim())
-                                            .filter(r => r !== '');
-                                    } else {
-                                        remarksArray = [approvalRemarks.trim()];
-                                    }
-                                }
-                                
-                                // console.log('Parsed remarks:', remarksArray);
-                                
-                                // Display documents with remarks
-                                displayDocumentsSimple(documents, remarksArray);
-                            },
-                            error: function(xhr, status, error) {
-                                console.error('Error loading approval data:', error);
-                                // console.log('XHR status:', status);
-                                // console.log('XHR response:', xhr.responseText);
-                                
-                                // Show documents with default remarks
-                                showDocumentsWithDefaultRemarks(documents);
-                            }
-                        });
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error('Error loading documents:', error);
-                    $('#documentTableBody').html('<tr><td colspan="4" class="text-center text-danger">Error loading documents. Please try again.</td></tr>');
+            if (!documents || documents.length === 0) {
+                $('#documentTableBody').html('<tr><td colspan="4" class="text-center">No documents uploaded yet.</td></tr>');
+                return;
+            }
+
+            // Each doc already has its own app_rem from the API
+            documents.forEach(function(doc) {
+                var appRemCell = '-';
+                if (doc.app_rem && doc.app_rem !== '-') {
+                    appRemCell = doc.app_rem;
                 }
+
+                $('#documentTableBody').append(
+                    '<tr>' +
+                    '<td class="align-middle">' + (doc.date || '-') + '</td>' +
+                    '<td class="align-middle">' + (doc.remarks || '-') + '</td>' +
+                    '<td class="align-middle">' + appRemCell + '</td>' +
+                    '<td class="align-middle">' +
+                        '<a href="' + doc.url + '" target="_blank" class="btn btn-sm text-white me-2 rounded-pill" style="background-color: #000088;">' +
+                            '<i class="bi bi-box-arrow-up-right me-1"></i>Open</a>' +
+                        '<a href="' + doc.url + '" download class="btn btn-sm text-white me-2 rounded-pill" style="background-color: #28A745;">' +
+                            '<i class="bi bi-download me-1"></i>Download</a>' +
+                    '</td>' +
+                    '</tr>'
+                );
             });
+        },
+        error: function() {
+            $('#documentTableBody').html('<tr><td colspan="4" class="text-center text-danger">Error loading documents.</td></tr>');
         }
+    });
+}
 
         function displayDocumentsSimple(documents, remarksArray) {
-            // console.log('Displaying documents with simple remarks:', remarksArray.length, 'remarks');
-            
-            if (remarksArray.length === 0) {
-                // No remarks available
-                documents.forEach(function(doc, index) {
-                    $('#documentTableBody').append(
-                        '<tr>' +
-                        '<td class="align-middle">' + (doc.date ?? '-') + '</td>' +
-                        '<td class="align-middle">' + (doc.remarks ?? '-') + '</td>' +
-                        '<td class="align-middle"><span class="text-muted">No approval remarks</span></td>' +
-                        '<td class="align-middle">' +
-                        '<a href="' + doc.url + '" target="_blank" class="btn btn-sm text-white me-2 rounded-pill" style="background-color: #000088;">' +
-                        '<i class="bi bi-box-arrow-up-right me-1"></i>Open</a>' +
-                        '<a href="' + doc.url + '" download class="btn btn-sm text-white me-2 rounded-pill" style="background-color: #28A745;">' +
-                        '<i class="bi bi-download me-1"></i>Download</a>' +
-                        '</td>' +
-                        '</tr>'
-                    );
-                });
-            } else {
-                // We have remarks - show them chronologically
-                documents.forEach(function(doc, index) {
-                    let remarkToShow = '';
-                    
-                    // Show the latest remark first, then previous ones
-                    if (remarksArray.length > 0) {
-                        // For the first row, show the latest remark
-                        if (index === 0) {
-                            remarkToShow = remarksArray[remarksArray.length - 1];
-                        } 
-                        // For subsequent rows, show previous remarks in reverse chronological order
-                        else if (index <= remarksArray.length) {
-                            const remarkIndex = remarksArray.length - index - 1;
-                            if (remarkIndex >= 0) {
-                                remarkToShow = remarksArray[remarkIndex];
-                            }
-                        }
-                    }
-                    
-                    // Extract timestamp if present for cleaner display
-                    let displayRemark = remarkToShow;
-                    if (displayRemark) {
-                        // Remove timestamp brackets for cleaner display
-                        displayRemark = displayRemark.replace(/^\[(.*?)\]\s*/, '');
-                        
-                        // Truncate if too long
-                        if (displayRemark.length > 50) {
-                            displayRemark = displayRemark.substring(0, 50) + '...';
-                        }
-                    }
-                    
-                    $('#documentTableBody').append(
-                        '<tr>' +
-                        '<td class="align-middle">' + (doc.date ?? '-') + '</td>' +
-                        '<td class="align-middle">' + (doc.remarks ?? '-') + '</td>' +
-                        '<td class="align-middle">' +
-                        (remarkToShow ? 
-                            '<span class="approval-remark-simple" title="' + remarkToShow.replace(/"/g, '&quot;') + '">' + 
-                            displayRemark + 
-                            '</span>' : 
-                            '<span class="text-muted">-</span>'
-                        ) +
-                        '</td>' +
-                        '<td class="align-middle">' +
-                        '<a href="' + doc.url + '" target="_blank" class="btn btn-sm text-white me-2 rounded-pill" style="background-color: #000088;">' +
-                        '<i class="bi bi-box-arrow-up-right me-1"></i>Open</a>' +
-                        '<a href="' + doc.url + '" download class="btn btn-sm text-white me-2 rounded-pill" style="background-color: #28A745;">' +
-                        '<i class="bi bi-download me-1"></i>Download</a>' +
-                        '</td>' +
-                        '</tr>'
-                    );
-                });
-            }
+    // Each row shows its OWN app_rem from the API — same as main blade
+    documents.forEach(function(doc) {
+        var appRemCell = '-';
+        
+        if (doc.app_rem && doc.app_rem !== '-') {
+            appRemCell = doc.app_rem;
         }
+
+        $('#documentTableBody').append(
+            '<tr>' +
+            '<td class="align-middle">' + (doc.date || '-') + '</td>' +
+            '<td class="align-middle">' + (doc.remarks || '-') + '</td>' +
+            '<td class="align-middle">' + appRemCell + '</td>' +
+            '<td class="align-middle">' +
+                '<a href="' + doc.url + '" target="_blank" class="btn btn-sm text-white me-2 rounded-pill" style="background-color: #000088;">' +
+                    '<i class="bi bi-box-arrow-up-right me-1"></i>Open</a>' +
+                '<a href="' + doc.url + '" download class="btn btn-sm text-white me-2 rounded-pill" style="background-color: #28A745;">' +
+                    '<i class="bi bi-download me-1"></i>Download</a>' +
+            '</td>' +
+            '</tr>'
+        );
+    });
+}
 
         // Helper function to show documents with default remarks
         function showDocumentsWithDefaultRemarks(documents) {
@@ -3918,199 +3834,247 @@ Thank you for your cooperation.</textarea>
             });
         }
 
-        // Separate function for loading approval status
-        function loadApprovalStatus(docNo) {
-            $.ajax({
-                url: '{{ route("admin.getApprovalData") }}',
-                method: 'GET',
-                data: { doc_no: docNo },
-                success: function(response) {
-                    if (response.success) {
-                        // Set current document number
-                        $('#currentDocNo').val(docNo);
-                        
-                        // Set approval status text
-                        if (response.plr_final === 'Y') {
-                            $('#currentApprovalStatus').text('Status: Approved');
-                            $('#modalApproveBtn').show();
-                            $('#modalUnapproveBtn').show();
-                        } else if (response.plr_final === 'N') {
-                            $('#currentApprovalStatus').text('Status: Unapproved');
-                            $('#modalApproveBtn').show();
-                            $('#modalUnapproveBtn').show();
-                        } else if (response.plr_final === 'I') {
-                            $('#currentApprovalStatus').text('Status: In Process');
-                            $('#modalApproveBtn').show();
-                            $('#modalUnapproveBtn').show();
-                        } else if (response.plr_final === 'R') {
-                            $('#currentApprovalStatus').text('Status: Reminder Sent');
-                            $('#modalApproveBtn').show();
-                            $('#modalUnapproveBtn').show();
-                        } else if (response.plr_final === 'V') {
-                            $('#currentApprovalStatus').text('Status: Revision Requested');
-                            $('#modalApproveBtn').show();
-                            $('#modalUnapproveBtn').show();
-                        } else if (response.plr_final === null) {
-                            $('#currentApprovalStatus').text('Status: In Process');
-                            $('#modalApproveBtn').show();
-                            $('#modalUnapproveBtn').show();
-                        } else {
-                            $('#currentApprovalStatus').text('Status: Not set');
-                            $('#modalApproveBtn').show();
-                            $('#modalUnapproveBtn').show();
-                        }
-                        
-                        $('#approvalRemarks').val('');
-                    }
-                },
-                error: function() {
-                    $('#currentDocNo').val(docNo);
-                    $('#currentApprovalStatus').text('Status: Not set');
-                    $('#approvalRemarks').val('');
+       
+       
+//  loading approval status
+function loadApprovalStatus(docNo) {
+    // console.log('=== LOADING APPROVAL STATUS FOR DOCUMENT:', docNo, '===');
+    
+    $.ajax({
+        url: '{{ route("admin.getApprovalData") }}',
+        method: 'GET',
+        data: { doc_no: docNo },
+        success: function(response) {
+            console.log('Approval data response:', response);
+            
+            if (response.success) {
+                $('#currentDocNo').val(docNo);
+                
+                let hasUploads = response.has_uploads;
+                let currentStatus = response.plr_final;
+                let reportType = response.rep_tag;
+                let isInitialState = response.is_initial_state;
+                
+                // console.log('Document:', docNo);
+                // console.log('Has uploads:', hasUploads);
+                // console.log('Current plr_final:', currentStatus, 'type:', typeof currentStatus);
+                // console.log('Report type:', reportType);
+                
+                // CRITICAL: If no uploads, HIDE both buttons
+                if (!hasUploads) {
+                    console.log('No uploads - HIDING both buttons');
+                    $('#currentApprovalStatus').text('Status: No Documents Uploaded');
+                    $('#modalApproveBtn').hide();
+                    $('#modalUnapproveBtn').hide();
+                    $('#saveRemarksBtn').hide();  // Also hide save remarks button
+                    $('#approvalRemarks').prop('disabled', true);
+                    return;
+                }
+                
+                // Show save remarks button and enable textarea since there are uploads
+                $('#saveRemarksBtn').show();
+                $('#approvalRemarks').prop('disabled', false);
+                
+                // Determine which buttons to show based on status
+                if (currentStatus === 'Y') {
+                    // Already approved - show only Unapprove button
+                    console.log('Case: Approved - showing Unapprove only');
+                    $('#currentApprovalStatus').text('Status: Approved');
+                    $('#modalApproveBtn').hide();
+                    $('#modalUnapproveBtn').show();
+                    
+                } else if (currentStatus === 'N') {
+                    // Unapproved (after admin action) - show only Approve button
+                    console.log('Case: Unapproved (after admin action) - showing Approve only');
+                    $('#currentApprovalStatus').text('Status: Unapproved');
+                    $('#modalApproveBtn').show();
+                    $('#modalUnapproveBtn').hide();
+                    
+                } else if (currentStatus === null || isInitialState) {
+                    // Initial state (first upload, no admin decision yet) - show BOTH buttons
+                    console.log('Case: Initial state - showing BOTH buttons');
+                    $('#currentApprovalStatus').text('Status: Pending Review');
+                    $('#modalApproveBtn').show();
+                    $('#modalUnapproveBtn').show();
+                    
+                } else if (currentStatus === 'I' || currentStatus === 'R' || currentStatus === 'V') {
+                    // In Process, Reminder Sent, Revision Requested - show BOTH buttons
+                    let statusText = '';
+                    if (currentStatus === 'I') statusText = 'In Process';
+                    else if (currentStatus === 'R') statusText = 'Reminder Sent';
+                    else if (currentStatus === 'V') statusText = 'Revision Requested';
+                    
+                    console.log('Case: ' + statusText + ' - showing BOTH buttons');
+                    $('#currentApprovalStatus').text('Status: ' + statusText);
+                    $('#modalApproveBtn').show();
+                    $('#modalUnapproveBtn').show();
+                    
+                } else {
+                    // Fallback - show both buttons
+                    console.log('Case: Fallback - showing BOTH buttons');
+                    $('#currentApprovalStatus').text('Status: ' + (currentStatus || 'Pending Review'));
                     $('#modalApproveBtn').show();
                     $('#modalUnapproveBtn').show();
                 }
-            });
-        }
-
-        // APPROVE PLR FUNCTION
-        function approvePLR(docNo) {
-            // Find the file data first to get report type
-            const fileIndex = allData.findIndex(item => item.doc_no === docNo);
-            if (fileIndex === -1) {
-                showToast('File not found!', 'error');
-                return;
+                
+                $('#approvalRemarks').val('');
+            } else {
+                console.log('Response not successful:', response.message);
+                // On error, hide both buttons for safety
+                $('#modalApproveBtn').hide();
+                $('#modalUnapproveBtn').hide();
+                $('#saveRemarksBtn').hide();
+                $('#currentApprovalStatus').text('Status: Unable to load data');
             }
-            
-            const fileData = allData[fileIndex];
-            const reportType = fileData.rep_tag === 'F/R' ? 'Final Report' : 'Preliminary Report';
-            
-            // Show initial toast
-            showToast(`Processing ${reportType} approval...`, 'info');
-            
-            $.ajax({
-                url: '{{ route("documents.approve", ["doc" => "DOCNO"]) }}'.replace('DOCNO', docNo),
-                type: 'POST',
-                data: { 
-                    _token: '{{ csrf_token() }}'
-                },
-                success: function(response) {
-                    if (response.success) {
-                        // Update status to 'Y' (Approved)
-                        allData[fileIndex].plr_final = 'Y';
-                        
-                        // Log status change
-                        logStatusChangeToDatabase(docNo, 'Approved', reportType);
-                        
-                        // Show SUCCESS toast - use setTimeout to ensure it displays properly
-                        setTimeout(() => {
-                            showToast(`${reportType} approved for ${docNo}`, 'success');
-                        }, 100);
-                        
-                        // Refresh ALL views immediately
-                        updateMainStats();
-                        updateAppointmentStats();
-                        
-                        if (table) {
-                            const filtered = applyFilters();
-                            table.clear();
-                            table.rows.add(filtered);
-                            table.draw();
-                        }
-                        
-                        if (isMobile) {
-                            mobileOffset = 0;
-                            mobileHasMore = true;
-                            loadMobileCards(false);
-                        }
-                        
-                        // Update approval status in view modal if open
-                        if ($('#viewReportModal').hasClass('show')) {
-                            $('#currentApprovalStatus').text('Status: Approved');
-                            $('#modalApproveBtn').hide();
-                            $('#modalUnapproveBtn').show();
-                        }
-                    } else {
-                        setTimeout(() => {
-                            showToast('Failed: ' + response.message, 'error');
-                        }, 100);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error('Approve PLR Error:', xhr.responseText);
-                    setTimeout(() => {
-                        showToast('Server error. Failed to approve.', 'error');
-                    }, 100);
-                }
-            });
+        },
+        error: function(xhr, status, error) {
+            console.error('Error loading approval data:', error);
+            // On error, hide both buttons for safety
+            $('#modalApproveBtn').hide();
+            $('#modalUnapproveBtn').hide();
+            $('#saveRemarksBtn').hide();
+            $('#currentApprovalStatus').text('Status: Error loading data');
         }
-
-        // UNAPPROVE PLR FUNCTION
-        function unapprovePLR(docNo) {
-            if (!confirm('Are you sure you want to unapprove this report?')) return;
-
-            $.ajax({
-                url: '{{ route("admin.unapprove-plr") }}',
-                type: 'POST',
-                data: {
-                    _token: '{{ csrf_token() }}',
-                    doc_no: docNo
-                },
-                beforeSend: function() {
-                    showToast('Processing unapproval...', 'info');
-                },
-                success: function(response) {
-                    if (response.success) {
-                        // Find the file in allData array
-                        const fileIndex = allData.findIndex(item => item.doc_no === docNo);
-                        if (fileIndex !== -1) {
-                            // Update status to 'N' (Unapproved)
-                            allData[fileIndex].plr_final = 'N';
-                        }
-                        
-                        // Try to log status change, but don't let it break the flow
-                        try {
-                            logStatusChangeToDatabase(docNo, 'Unapproved', reportType);
-                        } catch (error) {
-                            console.warn('Failed to log status change:', error);
-                            // Continue with the rest of the success flow
-                        }
-                        
-                        showToast('Report unapproved for ' + docNo, 'success');
-                        
-                        // Refresh ALL views immediately
-                        updateMainStats();
-                        updateAppointmentStats();
-                        
-                        if (table) {
-                            const filtered = applyFilters();
-                            table.clear();
-                            table.rows.add(filtered);
-                            table.draw();
-                        }
-                        
-                        if (isMobile) {
-                            mobileOffset = 0;
-                            mobileHasMore = true;
-                            loadMobileCards(false);
-                        }
-                        
-                        // Update approval status in view modal if open
-                        if ($('#viewReportModal').hasClass('show')) {
-                            $('#currentApprovalStatus').text('Status: Unapproved');
-                            $('#modalUnapproveBtn').hide();
-                            $('#modalApproveBtn').show();
-                        }
-                    } else {
-                        showToast('Failed: ' + response.message, 'error');
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error('Unapprove error:', xhr.responseText);
-                    showToast('Server error. Failed to unapprove.', 'error');
+    });
+}
+        // APPROVE PLR FUNCTION
+function approvePLR(docNo) {
+    // Find the file data first to get report type
+    const fileIndex = allData.findIndex(item => item.doc_no === docNo);
+    if (fileIndex === -1) {
+        showToast('File not found!', 'error');
+        return;
+    }
+    
+    const fileData = allData[fileIndex];
+    const reportType = fileData.rep_tag === 'F/R' ? 'Final Report' : 'Preliminary Report';
+    
+    // Show initial toast
+    showToast(`Processing ${reportType} approval...`, 'info');
+    
+    $.ajax({
+        url: '{{ route("documents.approve", ["doc" => "DOCNO"]) }}'.replace('DOCNO', docNo),
+        type: 'POST',
+        data: { 
+            _token: '{{ csrf_token() }}'
+        },
+        success: function(response) {
+            if (response.success) {
+                // Update status to 'Y' (Approved)
+                allData[fileIndex].plr_final = 'Y';
+                
+                // Log status change
+                logStatusChangeToDatabase(docNo, 'Approved', reportType);
+                
+                // Show SUCCESS toast
+                setTimeout(() => {
+                    showToast(`${reportType} approved for ${docNo}`, 'success');
+                }, 100);
+                
+                // Refresh ALL views immediately
+                updateMainStats();
+                updateAppointmentStats();
+                
+                if (table) {
+                    const filtered = applyFilters();
+                    table.clear();
+                    table.rows.add(filtered);
+                    table.draw();
                 }
-            });
+                
+                if (isMobile) {
+                    mobileOffset = 0;
+                    mobileHasMore = true;
+                    loadMobileCards(false);
+                }
+                
+                // Update approval status in view modal if open
+                if ($('#viewReportModal').hasClass('show')) {
+                    $('#currentApprovalStatus').text('Status: Approved');
+                    $('#modalApproveBtn').hide();  // Hide Approve button
+                    $('#modalUnapproveBtn').show(); // Show Unapprove button
+                }
+            } else {
+                setTimeout(() => {
+                    showToast('Failed: ' + response.message, 'error');
+                }, 100);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('Approve PLR Error:', xhr.responseText);
+            setTimeout(() => {
+                showToast('Server error. Failed to approve.', 'error');
+            }, 100);
         }
+    });
+}
+
+// UNAPPROVE PLR FUNCTION
+function unapprovePLR(docNo) {
+    if (!confirm('Are you sure you want to unapprove this report?')) return;
+
+    $.ajax({
+        url: '{{ route("admin.unapprove-plr") }}',
+        type: 'POST',
+        data: {
+            _token: '{{ csrf_token() }}',
+            doc_no: docNo
+        },
+        beforeSend: function() {
+            showToast('Processing unapproval...', 'info');
+        },
+        success: function(response) {
+            if (response.success) {
+                // Find the file in allData array
+                const fileIndex = allData.findIndex(item => item.doc_no === docNo);
+                if (fileIndex !== -1) {
+                    // Update status to 'N' (Unapproved)
+                    allData[fileIndex].plr_final = 'N';
+                }
+                
+                // Try to log status change, but don't let it break the flow
+                try {
+                    logStatusChangeToDatabase(docNo, 'Unapproved', 'Report');
+                } catch (error) {
+                    console.warn('Failed to log status change:', error);
+                    // Continue with the rest of the success flow
+                }
+                
+                showToast('Report unapproved for ' + docNo, 'success');
+                
+                // Refresh ALL views immediately
+                updateMainStats();
+                updateAppointmentStats();
+                
+                if (table) {
+                    const filtered = applyFilters();
+                    table.clear();
+                    table.rows.add(filtered);
+                    table.draw();
+                }
+                
+                if (isMobile) {
+                    mobileOffset = 0;
+                    mobileHasMore = true;
+                    loadMobileCards(false);
+                }
+                
+                // Update approval status in view modal if open
+                if ($('#viewReportModal').hasClass('show')) {
+                    $('#currentApprovalStatus').text('Status: Unapproved');
+                    $('#modalApproveBtn').show();   // Show Approve button
+                    $('#modalUnapproveBtn').hide();  // Hide Unapprove button
+                }
+            } else {
+                showToast('Failed: ' + response.message, 'error');
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('Unapprove error:', xhr.responseText);
+            showToast('Server error. Failed to unapprove.', 'error');
+        }
+    });
+}
 
         // Mark document as In Process with action type
         function markAsInProcess(docNo, action = 'I') {
