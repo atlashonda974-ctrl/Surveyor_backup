@@ -1355,14 +1355,55 @@ $bodyContent .= '
             ->orderBy('datetime_field', 'desc')
             ->get()
             ->map(function ($doc) {
-                $filename = $doc->file_path; // Already only filename
-
+                $filename = $doc->file_path;
+                
+                // Process app_rem - extract message without timestamp
+                $appRem = $doc->app_rem;
+                $appRemText = '';
+                $appRemTooltip = '';
+                
+                if ($appRem) {
+                    // Split by newlines to process each line
+                    $lines = explode("\n", $appRem);
+                    $cleanMessages = [];
+                    $tooltipLines = [];
+                    
+                    foreach ($lines as $line) {
+                        $line = trim($line);
+                        if (empty($line)) continue;
+                        
+                        // Check if line has timestamp pattern [YYYY-MM-DD HH:MM:SS]
+                        if (preg_match('/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*(.*)$/', $line, $matches)) {
+                            $timestamp = $matches[1];
+                            $message = $matches[2];
+                            
+                            // Add to tooltip with timestamp
+                            $tooltipLines[] = "📅 {$timestamp}: {$message}";
+                            // Add only message to visible text
+                            if (!empty($message)) {
+                                $cleanMessages[] = $message;
+                            }
+                        } else {
+                            // Line without timestamp - show as is
+                            $cleanMessages[] = $line;
+                            $tooltipLines[] = $line;
+                        }
+                    }
+                    
+                    $appRemText = !empty($cleanMessages) ? implode('<br>', $cleanMessages) : '-';
+                    $appRemTooltip = !empty($tooltipLines) ? implode("\n", $tooltipLines) : '';
+                }
+                
                 return [
                     'date'     => $doc->datetime_field ? date('d-m-Y', strtotime($doc->datetime_field)) : '-',
                     'remarks'  => $doc->remarks ?? '-',
+                    'app_rem'  => $appRemText ?: null,
+                    'app_rem_tooltip' => $appRemTooltip ?: null,
                     'estimate_amount' => $doc->estimate_amount ? '₹ ' . number_format($doc->estimate_amount, 2) : '-',
                     'url'      => $filename ? route('documents.download', ['filename' => $filename]) : '#',
                     'fileName' => $filename ?? 'file.pdf',
+                  
+                    
                 ];
             });
 
@@ -1372,7 +1413,6 @@ $bodyContent .= '
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
-
 
 public function downloadAllAsZip($document_no)
 {

@@ -405,7 +405,68 @@ public function getFiles(Request $request)
     //     }
     // }
 
-    public function unapprovePlr(Request $request)
+//     public function unapprovePlr(Request $request)
+// {
+//     try {
+//         $docNo = $request->input('doc_no');
+        
+//         if (!$docNo) {
+//             return response()->json([
+//                 'success' => false,
+//                 'message' => 'Document number is required'
+//             ], 400);
+//         }
+
+//         // Get the LATEST record
+//         $latestFile = FileTab::where('doc_no', $docNo)
+//                            ->orderByDesc('created_at')
+//                            ->first();
+        
+//         if (!$latestFile) {
+//             return response()->json([
+//                 'success' => false,
+//                 'message' => 'File not found'
+//             ], 404);
+//         }
+        
+//         // Check report type
+//         $reportType = $latestFile->rep_tag;
+//         $reportTypeName = $reportType === 'F/R' ? 'Final Report' : 'Preliminary Report';
+        
+//         // Only unapprove if it's currently approved
+//         if ($latestFile->plr_final === 'Y') {
+           
+//             $updatedCount = FileTab::where('doc_no', $docNo)
+//                 ->where('rep_tag', $reportType)
+//                 ->update([
+//                     'plr_final' => 'N',
+//                     'updated_at' => now()
+//                 ]);
+
+//             // Log::info("Report unapproved for doc_no: {$docNo}, Report Type: {$reportType}, Updated: {$updatedCount} records");
+
+//             return response()->json([
+//                 'success' => true,
+//                 'message' => 'Report has been unapproved successfully',
+//                 'doc_no' => $docNo,
+//                 'report_type' => $reportTypeName,
+//                 'records_updated' => $updatedCount
+//             ]);
+//         } else {
+//             return response()->json([
+//                 'success' => false,
+//                 'message' => 'Report is already unapproved'
+//             ]);
+//         }
+//     } catch (\Exception $e) {
+//         Log::error("Error unapproving PLR: " . $e->getMessage());
+//         return response()->json([
+//             'success' => false,
+//             'message' => 'Error unapproving PLR: ' . $e->getMessage()
+//         ], 500);
+//     }
+// }
+public function unapprovePlr(Request $request)
 {
     try {
         $docNo = $request->input('doc_no');
@@ -440,6 +501,7 @@ public function getFiles(Request $request)
                 ->where('rep_tag', $reportType)
                 ->update([
                     'plr_final' => 'N',
+                    'updated_by' => session('user')['name'] ?? 'System',
                     'updated_at' => now()
                 ]);
 
@@ -466,7 +528,6 @@ public function getFiles(Request $request)
         ], 500);
     }
 }
-
 /**
  * Mark document as In Process (when admin sends reminder/revision)
  */
@@ -835,6 +896,56 @@ public function resendWelcomeEmail($id)
 }
   
 
+// public function getApprovalData(Request $request)
+// {
+//     try {
+//         $docNo = trim($request->query('doc_no'));
+        
+//         if (!$docNo) {
+//             return response()->json([
+//                 'success' => false,
+//                 'message' => 'Document number is required'
+//             ], 400);
+//         }
+        
+//         // Log::info('Fetching approval data for document: ' . $docNo);
+        
+      
+//         $data = DB::table('filestab')
+//             ->where('doc_no', $docNo)  // Changed from uw_doc to doc_no
+//             ->select('plr_final', 'remarks', 'app_rem')
+//             ->first();
+        
+//         if (!$data) {
+//             // Log::info('No data found in filestab for doc_no: ' . $docNo);
+//             return response()->json([
+//                 'success' => true,
+//                 'plr_final' => null,
+//                 'remarks' => '',
+//                 'app_rem' => ''
+//             ]);
+//         }
+        
+//         // Log::info('Data found - app_rem: ' . ($data->app_rem ?: 'empty'));
+        
+//         return response()->json([
+//             'success' => true,
+//             'plr_final' => $data->plr_final,
+//             'remarks' => $data->remarks,
+//             'app_rem' => $data->app_rem ?? ''
+//         ]);
+        
+//     } catch (\Exception $e) {
+//         // Log::error('Error getting approval data: ' . $e->getMessage());
+//         // Log::error('SQL Error: ' . $e->getMessage());
+//         // Log::error('Trace: ' . $e->getTraceAsString());
+        
+//         return response()->json([
+//             'success' => false,
+//             'message' => 'Failed to get approval data: ' . $e->getMessage()
+//         ], 500);
+//     }
+// }
 public function getApprovalData(Request $request)
 {
     try {
@@ -847,37 +958,108 @@ public function getApprovalData(Request $request)
             ], 400);
         }
         
-        // Log::info('Fetching approval data for document: ' . $docNo);
+        // Get ALL records for this document
+        $allRecords = DB::table('filestab')
+            ->where('doc_no', $docNo)
+            ->orderBy('created_at', 'asc')
+            ->get();
         
-      
-        $data = DB::table('filestab')
-            ->where('doc_no', $docNo)  // Changed from uw_doc to doc_no
-            ->select('plr_final', 'remarks', 'app_rem')
-            ->first();
-        
-        if (!$data) {
-            // Log::info('No data found in filestab for doc_no: ' . $docNo);
+        // CRITICAL: If no records exist, this is a document with no uploads
+        if ($allRecords->isEmpty()) {
             return response()->json([
                 'success' => true,
+                'has_uploads' => false,           // No uploads exist
                 'plr_final' => null,
-                'remarks' => '',
-                'app_rem' => ''
+                'report_type' => null,
+                'message' => 'No files uploaded yet - no buttons should show'
             ]);
         }
         
-        // Log::info('Data found - app_rem: ' . ($data->app_rem ?: 'empty'));
+        // Get the latest record
+        $latestRecord = $allRecords->last();
+        $currentReportType = $latestRecord->rep_tag;
+        
+        // Check admin actions for the CURRENT report type only
+        $hasAdminActionForCurrentType = DB::table('filestab')
+            ->where('doc_no', $docNo)
+            ->where('rep_tag', $currentReportType)
+            ->where(function($query) {
+                $query->whereNotNull('updated_by')
+                      ->orWhere('plr_final', 'Y')
+                      ->orWhere('plr_final', 'I')
+                      ->orWhere('plr_final', 'R')
+                      ->orWhere('plr_final', 'V');
+            })
+            ->exists();
+        
+        // Check if there were reminders/revisions for the CURRENT report type
+        $hadReminderOrRevisionForCurrentType = DB::table('filestab')
+            ->where('doc_no', $docNo)
+            ->where('rep_tag', $currentReportType)
+            ->whereIn('plr_final', ['R', 'V'])
+            ->exists();
+        
+        // Check if admin has added remarks for the CURRENT report type
+        $hasAdminRemarksForCurrentType = DB::table('filestab')
+            ->where('doc_no', $docNo)
+            ->where('rep_tag', $currentReportType)
+            ->whereNotNull('app_rem')
+            ->where('app_rem', '!=', '')
+            ->exists();
+        
+        // Determine if this is initial state for the CURRENT report type
+        $isInitialState = false;
+        
+        if ($latestRecord->plr_final === 'N' && 
+            !$hasAdminActionForCurrentType && 
+            !$hasAdminRemarksForCurrentType) {
+            $isInitialState = true;
+        }
+        
+        // Determine if this is a "post-action" state for the CURRENT report type
+        $isPostActionState = false;
+        
+        if ($latestRecord->plr_final === 'N' && $hadReminderOrRevisionForCurrentType) {
+            $isPostActionState = true;
+        }
+        
+        // Determine what status to return
+        $returnStatus = $latestRecord->plr_final;
+        $shouldShowButtons = true;  // Since we have uploads
+        
+        if ($isInitialState) {
+            $returnStatus = null;  // null means show both buttons
+        } elseif ($isPostActionState) {
+            $returnStatus = null;  // null means show both buttons
+        }
+        
+        $latestWithRemark = DB::table('filestab')
+    ->where('doc_no', $docNo)
+    ->whereNotNull('app_rem')
+    ->where('app_rem', '!=', '')
+    ->orderByDesc('id')
+    ->value('app_rem');
+
+$allRemarks = $latestWithRemark ?? '';
         
         return response()->json([
             'success' => true,
-            'plr_final' => $data->plr_final,
-            'remarks' => $data->remarks,
-            'app_rem' => $data->app_rem ?? ''
+            'has_uploads' => true,              // Uploads exist
+            'plr_final' => $returnStatus,
+            'remarks' => $latestRecord->remarks ?? '',
+            'app_rem' => $allRemarks ?: '',
+            'is_initial_state' => $isInitialState,
+            'is_post_action_state' => $isPostActionState,
+            'actual_status' => $latestRecord->plr_final,
+            'report_type' => $currentReportType,
+            'has_admin_action' => $hasAdminActionForCurrentType,
+            'should_show_buttons' => true,
+            'message' => $isPostActionState ? 'Post-action state - show both buttons' : 
+                        ($isInitialState ? 'Initial state - show both buttons' : 'Normal state')
         ]);
         
     } catch (\Exception $e) {
-        // Log::error('Error getting approval data: ' . $e->getMessage());
-        // Log::error('SQL Error: ' . $e->getMessage());
-        // Log::error('Trace: ' . $e->getTraceAsString());
+        \Log::error('Error getting approval data: ' . $e->getMessage());
         
         return response()->json([
             'success' => false,
@@ -885,153 +1067,171 @@ public function getApprovalData(Request $request)
         ], 500);
     }
 }
-
-    /**
-     * Save approval status and remarks
-     */
-    public function saveApproval(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'uw_doc' => 'required|string',
-                'plr_final' => 'required|in:Y,null',
-                'remarks' => 'nullable|string|max:1000'
-            ]);
-            
-            $docNo = $validated['uw_doc'];
-            $plrFinal = $validated['plr_final'] === 'null' ? null : 'Y';
-            $remarks = $validated['remarks'] ?? null;
-            
-            // Update or create approval record
-            $approval = FileTab::updateOrCreate(
-                ['uw_doc' => $docNo],
-                [
-                    'plr_final' => $plrFinal,
-                    'remarks' => $remarks,
-                    'updated_at' => now()
-                ]
-            );
-            
-            // Log the approval action
-            // Log::info('PLR approved for document: ' . $docNo . ' with status: ' . ($plrFinal ?? 'null'));
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Approval saved successfully',
-                'plr_final' => $approval->plr_final
-            ]);
-            
-        } catch (\Exception $e) {
-            // Log::error('Error saving approval: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage()
-            ], 500);
-        }
-    }
-
     /**
      * Save only remarks (separate from approval status)
      */
    
+// public function saveRemarks(Request $request)
+// {
+//     try {
+//         $request->validate([
+//             'uw_doc' => 'required|string',  
+//             'app_rem' => 'required|string|max:1000'
+//         ]);
+
+//         $docNo = trim($request->uw_doc);  // This is doc_no in the database
+//         $newRemark = trim($request->app_rem);
+        
+//         if (empty($newRemark)) {
+//             return response()->json([
+//                 'success' => false,
+//                 'message' => 'Remark cannot be empty.'
+//             ]);
+//         }
+
+//         // Check if document exists in filestab table
+//         $document = DB::table('filestab')
+//             ->where('doc_no', $docNo)  // Use doc_no column
+//             ->first();
+
+//         if (!$document) {
+//             return response()->json([
+//                 'success' => false,
+//                 'message' => 'Document not found in database. Doc No: ' . $docNo
+//             ]);
+//         }
+
+//         // Add timestamp to the new remark
+//         $timestamp = now()->format('Y-m-d H:i:s');
+//         $remarkWithTime = "[{$timestamp}] {$newRemark}";
+        
+//         // Get current remarks from the 'app_rem' column
+//         $currentRemarks = $document->app_rem ?? '';
+        
+//         // Log::info('Saving remarks for doc: ' . $docNo);
+//         // Log::info('Current remarks: ' . $currentRemarks);
+//         // Log::info('New remark: ' . $remarkWithTime);
+        
+//         // Add new remark with timestamp
+//         if (!empty($currentRemarks) && trim($currentRemarks) !== '') {
+//             // Append with newline for better separation
+//             $updatedRemarks = $currentRemarks . "\n" . $remarkWithTime;
+//         } else {
+//             $updatedRemarks = $remarkWithTime;
+//         }
+        
+//         // Update the 'app_rem' column
+//         $updated = DB::table('filestab')
+//             ->where('doc_no', $docNo)  // Use doc_no column
+//             ->update([
+//                 'app_rem' => $updatedRemarks,
+//                 'updated_at' => now()
+//             ]);
+
+//         if ($updated) {
+//             // Also update plr_final if it's not set
+//             if (!$document->plr_final || $document->plr_final === 'null') {
+//                 DB::table('filestab')
+//                     ->where('doc_no', $docNo)
+//                     ->update(['plr_final' => 'I']); // Set to In Process
+//             }
+            
+//             return response()->json([
+//                 'success' => true,
+//                 'message' => 'New remark added successfully!',
+//                 'data' => [
+//                     'doc_no' => $docNo,
+//                     'app_rem' => $updatedRemarks,
+//                     'timestamp' => $timestamp
+//                 ]
+//             ]);
+//         }
+
+//         return response()->json([
+//             'success' => false,
+//             'message' => 'Failed to save new remark. No rows were updated.'
+//         ]);
+
+//     } catch (\Exception $e) {
+//         // Log::error('Error saving remarks: ' . $e->getMessage());
+//         // Log::error('Trace: ' . $e->getTraceAsString());
+        
+//         return response()->json([
+//             'success' => false,
+//             'message' => 'Error: ' . $e->getMessage()
+//         ], 500);
+//     }
+// }
+
+
 public function saveRemarks(Request $request)
 {
     try {
         $request->validate([
-            'uw_doc' => 'required|string',  
+            'uw_doc'  => 'required|string',
             'app_rem' => 'required|string|max:1000'
         ]);
 
-        $docNo = trim($request->uw_doc);  // This is doc_no in the database
+        $docNo    = trim($request->uw_doc);
         $newRemark = trim($request->app_rem);
-        
+
         if (empty($newRemark)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Remark cannot be empty.'
-            ]);
+            return response()->json(['success' => false, 'message' => 'Remark cannot be empty.']);
         }
 
-        // Check if document exists in filestab table
+        //  Get ONLY the latest record — not all rows
         $document = DB::table('filestab')
-            ->where('doc_no', $docNo)  // Use doc_no column
+            ->where('doc_no', $docNo)
+            ->orderByDesc('id')
             ->first();
 
         if (!$document) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Document not found in database. Doc No: ' . $docNo
-            ]);
+            return response()->json(['success' => false, 'message' => 'Document not found. Doc No: ' . $docNo]);
         }
 
-        // Add timestamp to the new remark
-        $timestamp = now()->format('Y-m-d H:i:s');
-        $remarkWithTime = "[{$timestamp}] {$newRemark}";
-        
-        // Get current remarks from the 'app_rem' column
-        $currentRemarks = $document->app_rem ?? '';
-        
-        // Log::info('Saving remarks for doc: ' . $docNo);
-        // Log::info('Current remarks: ' . $currentRemarks);
-        // Log::info('New remark: ' . $remarkWithTime);
-        
-        // Add new remark with timestamp
-        if (!empty($currentRemarks) && trim($currentRemarks) !== '') {
-            // Append with newline for better separation
-            $updatedRemarks = $currentRemarks . "\n" . $remarkWithTime;
-        } else {
-            $updatedRemarks = $remarkWithTime;
-        }
-        
-        // Update the 'app_rem' column
+        $timestamp       = now()->format('Y-m-d H:i:s');
+        $remarkWithTime  = "[{$timestamp}] {$newRemark}";
+        $currentRemarks  = $document->app_rem ?? '';
+
+        $updatedRemarks = !empty(trim($currentRemarks))
+            ? $currentRemarks . "\n" . $remarkWithTime
+            : $remarkWithTime;
+
+        //  Update BY ID — only this one row, not all rows for the doc
         $updated = DB::table('filestab')
-            ->where('doc_no', $docNo)  // Use doc_no column
+            ->where('id', $document->id)
             ->update([
-                'app_rem' => $updatedRemarks,
+                'app_rem'    => $updatedRemarks,
+                'updated_by' => session('user')['name'] ?? 'admin',
                 'updated_at' => now()
             ]);
 
         if ($updated) {
-            // Also update plr_final if it's not set
+            // Set to In Process only if no status yet
             if (!$document->plr_final || $document->plr_final === 'null') {
                 DB::table('filestab')
-                    ->where('doc_no', $docNo)
-                    ->update(['plr_final' => 'I']); // Set to In Process
+                    ->where('id', $document->id)
+                    ->update(['plr_final' => 'I']);
             }
-            
+
             return response()->json([
                 'success' => true,
-                'message' => 'New remark added successfully!',
-                'data' => [
-                    'doc_no' => $docNo,
-                    'app_rem' => $updatedRemarks,
-                    'timestamp' => $timestamp
-                ]
+                'message' => 'Remark added successfully!',
+                'data'    => ['doc_no' => $docNo, 'app_rem' => $updatedRemarks, 'timestamp' => $timestamp]
             ]);
         }
 
-        return response()->json([
-            'success' => false,
-            'message' => 'Failed to save new remark. No rows were updated.'
-        ]);
+        return response()->json(['success' => false, 'message' => 'No rows were updated.']);
 
     } catch (\Exception $e) {
-        // Log::error('Error saving remarks: ' . $e->getMessage());
-        // Log::error('Trace: ' . $e->getTraceAsString());
-        
-        return response()->json([
-            'success' => false,
-            'message' => 'Error: ' . $e->getMessage()
-        ], 500);
+        return response()->json(['success' => false, 'message' => 'Error: ' . $e->getMessage()], 500);
     }
 }
 
 
 
-
-
-
 }
+
 
 
 
